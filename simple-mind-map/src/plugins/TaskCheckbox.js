@@ -9,61 +9,29 @@ class TaskCheckbox {
     this.checkboxMargin = 8
     
     // 绑定方法到当前实例，确保 this 上下文正确
-    this.updateAllCheckboxes = this.updateAllCheckboxes.bind(this)
-    this.handleNodeTreeRenderEnd = this.handleNodeTreeRenderEnd.bind(this)
-    this.handleDataChange = this.handleDataChange.bind(this)
-    this.handleNodeActive = this.handleNodeActive.bind(this)
+    this.createCheckboxContent = this.createCheckboxContent.bind(this)
+    this.handleBeforeShowTextEdit = this.handleBeforeShowTextEdit.bind(this)
     
-    // 监听节点创建内容事件
-    this.mindMap.on('node_tree_render_end', this.handleNodeTreeRenderEnd)
+    // 设置 createNodePrefixContent 配置
+    this.mindMap.opt.createNodePrefixContent = this.createCheckboxContent
     
-    // 监听数据变化（包括新增、删除子节点）
-    this.mindMap.on('data_change', this.handleDataChange)
-    
-    // 监听节点激活事件（节点被编辑或添加子节点时）
-    this.mindMap.on('node_active', this.handleNodeActive)
-    
-    // 延迟初始化，确保节点树已经渲染
-    setTimeout(() => {
-      this.updateAllCheckboxes()
-    }, 100)
+    // 监听文本编辑前事件，防止点击勾选框时触发编辑
+    this.mindMap.on('before_show_text_edit', this.handleBeforeShowTextEdit)
   }
 
   /**
-   * 处理节点树渲染完成事件
+   * 处理文本编辑前事件
    */
-  handleNodeTreeRenderEnd() {
-    this.updateAllCheckboxes()
-  }
-
-  /**
-   * 处理数据变化事件
-   */
-  handleDataChange() {
-    // 延迟更新，确保DOM已经更新
-    setTimeout(() => {
-      this.updateAllCheckboxes()
-      this.mindMap.render()
-    }, 50)
-  }
-
-  /**
-   * 处理节点激活事件
-   */
-  handleNodeActive() {
-    // 节点激活时也更新勾选框
-    setTimeout(() => {
-      this.updateAllCheckboxes()
-    }, 50)
+  handleBeforeShowTextEdit() {
+    // 可以在这里添加逻辑，防止点击勾选框时触发文本编辑
   }
 
   /**
    * 插件被移除前调用的钩子
    */
   beforePluginRemove() {
-    this.mindMap.off('node_tree_render_end', this.handleNodeTreeRenderEnd)
-    this.mindMap.off('data_change', this.handleDataChange)
-    this.mindMap.off('node_active', this.handleNodeActive)
+    this.mindMap.off('before_show_text_edit', this.handleBeforeShowTextEdit)
+    this.mindMap.opt.createNodePrefixContent = null
   }
 
   /**
@@ -71,26 +39,6 @@ class TaskCheckbox {
    */
   beforePluginDestroy() {
     this.beforePluginRemove()
-  }
-
-  /**
-   * 更新所有节点的勾选框
-   */
-  updateAllCheckboxes() {
-    const walk = root => {
-      if (root.nodeData && root.nodeData.data) {
-        this.calculateCompletion(root.nodeData.data)
-      }
-      if (root.children && root.children.length > 0) {
-        root.children.forEach(child => {
-          walk(child)
-        })
-      }
-    }
-    
-    if (this.mindMap.renderer && this.mindMap.renderer.root) {
-      walk(this.mindMap.renderer.root)
-    }
   }
 
   /**
@@ -129,14 +77,14 @@ class TaskCheckbox {
   }
 
   /**
-   * 创建勾选框内容
+   * 创建勾选框内容（此方法会在每次节点渲染时被调用）
    * @param {Object} node - 节点实例
    * @returns {Object} 勾选框元素信息
    */
   createCheckboxContent(node) {
     const nodeData = node.nodeData
     const hasChildren = nodeData.children && nodeData.children.length > 0
-    const checked = nodeData.data.taskChecked === true
+    const checked = nodeData.data && nodeData.data.taskChecked === true
     
     // 在创建勾选框前先计算完成度
     let completion = { total: 0, completed: 0, percentage: 0 }
@@ -146,23 +94,25 @@ class TaskCheckbox {
 
     // 创建一个 div 容器
     const container = document.createElement('div')
+    container.className = 'task-checkbox-container'
     container.style.width = this.checkboxSize + 'px'
     container.style.height = this.checkboxSize + 'px'
     container.style.display = 'inline-block'
     container.style.cursor = 'pointer'
-    container.style.verticalAlign = 'top'  // 改为 top，避免显示不全
+    container.style.verticalAlign = 'top'
     container.style.marginRight = this.checkboxMargin + 'px'
     container.style.position = 'relative'
+    container.style.flexShrink = '0'
     
     // 创建 SVG 元素
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     svg.setAttribute('width', this.checkboxSize)
     svg.setAttribute('height', this.checkboxSize)
     svg.setAttribute('viewBox', `0 0 ${this.checkboxSize} ${this.checkboxSize}`)
-    svg.style.display = 'block'  // 确保SVG完整显示
-    svg.style.overflow = 'visible'  // 允许内容溢出
+    svg.style.display = 'block'
+    svg.style.overflow = 'visible'
     
-    if (hasChildren && completion.total > 0) {
+    if (hasChildren) {
       // 父节点：显示圆形进度
       this.renderProgressCircle(svg, completion.percentage)
     } else {
@@ -180,19 +130,24 @@ class TaskCheckbox {
 
     // 返回符合 createNodePrefixContent 要求的对象格式
     return {
-      el: container,  // DOM 元素
+      el: container,
       width: this.checkboxSize + this.checkboxMargin,
       height: this.checkboxSize
     }
   }
 
   /**
-   * 渲染勾选框（叶子节点）- 使用原生 DOM API
+   * 渲染勾选框（叶子节点）
    * @param {SVGElement} svg - SVG 容器元素
    * @param {Boolean} checked - 是否勾选
    */
   renderCheckbox(svg, checked) {
     const size = this.checkboxSize
+
+    // 清空SVG内容
+    while (svg.firstChild) {
+      svg.removeChild(svg.firstChild)
+    }
 
     // 背景矩形
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -222,7 +177,7 @@ class TaskCheckbox {
   }
 
   /**
-   * 渲染进度圆圈（父节点）- 使用原生 DOM API
+   * 渲染进度圆圈（父节点）
    * @param {SVGElement} svg - SVG 容器元素
    * @param {Number} percentage - 完成百分比
    */
@@ -231,6 +186,11 @@ class TaskCheckbox {
     const radius = size / 2 - 2
     const center = size / 2
     const circumference = 2 * Math.PI * radius
+
+    // 清空SVG内容
+    while (svg.firstChild) {
+      svg.removeChild(svg.firstChild)
+    }
 
     // 背景圆圈
     const bgCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
@@ -261,9 +221,8 @@ class TaskCheckbox {
       svg.appendChild(progressCircle)
     }
 
-    // 百分比文字（小字体）
+    // 完成时显示对勾
     if (percentage === 100) {
-      // 完成时显示对勾
       const checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
       checkPath.setAttribute('d', `M${center - 3},${center} L${center - 1},${center + 2} L${center + 3},${center - 2}`)
       checkPath.setAttribute('fill', 'none')
@@ -286,24 +245,23 @@ class TaskCheckbox {
 
     if (!hasChildren) {
       // 叶子节点：切换自身状态
-      const newState = !nodeData.data.taskChecked
+      const newState = !(nodeData.data && nodeData.data.taskChecked)
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         taskChecked: newState
       })
     } else {
       // 父节点：根据当前完成度决定是全部勾选还是全部取消
       const completion = this.calculateCompletion(nodeData)
-      const newState = completion.percentage < 100 // 如果未完全完成，则全部勾选；否则全部取消
+      const newState = completion.percentage < 100
       this.setAllChildrenState(node, newState)
     }
 
-    // 强制重新计算所有节点的完成度并重新渲染
-    this.updateAllCheckboxes()
-    this.mindMap.render()
+    // 重新渲染整棵树以更新所有勾选框
+    this.reRenderTree()
   }
 
   /**
-   * 递归设置所有后代节点（叶子节点）的勾选状态
+   * 递归设置所有后代叶子节点的勾选状态
    * @param {Object} node - 节点实例
    * @param {Boolean} state - 目标状态
    */
@@ -330,6 +288,32 @@ class TaskCheckbox {
   }
 
   /**
+   * 重新渲染整棵节点树
+   */
+  reRenderTree() {
+    // 使用延迟确保数据已更新
+    setTimeout(() => {
+      const walk = (node) => {
+        // 重新创建前置内容（勾选框）
+        if (node && node.createNodeContents) {
+          node.createNodeContents(['prefix'])
+        }
+        // 递归处理子节点
+        if (node.children && node.children.length > 0) {
+          node.children.forEach(child => walk(child))
+        }
+      }
+      
+      if (this.mindMap.renderer && this.mindMap.renderer.root) {
+        walk(this.mindMap.renderer.root)
+      }
+      
+      // 触发完整渲染
+      this.mindMap.render()
+    }, 50)
+  }
+
+  /**
    * 设置节点的勾选状态
    * @param {Object} node - 节点实例
    * @param {Boolean} checked - 是否勾选
@@ -338,7 +322,7 @@ class TaskCheckbox {
     this.mindMap.execCommand('SET_NODE_DATA', node, {
       taskChecked: checked === true
     })
-    this.mindMap.render()
+    this.reRenderTree()
   }
 
   /**
@@ -347,7 +331,7 @@ class TaskCheckbox {
    * @returns {Boolean} 是否勾选
    */
   getNodeChecked(node) {
-    return node.nodeData.data.taskChecked === true
+    return node.nodeData.data && node.nodeData.data.taskChecked === true
   }
 
   /**
@@ -356,12 +340,11 @@ class TaskCheckbox {
    * @returns {Object} 完成度信息 { total, completed, percentage }
    */
   getNodeCompletion(node) {
-    this.calculateCompletion(node.nodeData)
-    return node.nodeData.data._completion || { total: 0, completed: 0, percentage: 0 }
+    const completion = this.calculateCompletion(node.nodeData)
+    return completion
   }
 }
 
 TaskCheckbox.instanceName = 'taskCheckbox'
 
 export default TaskCheckbox
-
