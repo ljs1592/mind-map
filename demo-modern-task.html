@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>现代化主题 + 任务勾选框演示 - 思维导图</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 20px 40px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      color: #64748b;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .toolbar {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 15px 40px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+      box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: white;
+      color: #475569;
+      border: 1px solid #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      transform: translateY(-1px);
+    }
+
+    .btn-success {
+      background: #10b981;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #059669;
+      box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn-warning {
+      background: #f59e0b;
+      color: white;
+    }
+
+    .btn-warning:hover {
+      background: #d97706;
+      box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .container {
+      flex: 1;
+      padding: 30px 40px;
+      display: flex;
+      gap: 30px;
+    }
+
+    .mind-map-wrapper {
+      flex: 1;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      overflow: hidden;
+      position: relative;
+    }
+
+    #mindMapContainer {
+      width: 100%;
+      height: 100%;
+    }
+
+    .info-panel {
+      width: 320px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 25px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      overflow-y: auto;
+      max-height: calc(100vh - 280px);
+    }
+
+    .info-panel h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .info-panel h3::before {
+      content: "✨";
+    }
+
+    .info-section {
+      margin-bottom: 25px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .info-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .info-section h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 10px;
+    }
+
+    .info-section ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .info-section li {
+      padding: 8px 0;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.6;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .info-section li::before {
+      content: "•";
+      color: #3b82f6;
+      font-weight: bold;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-top: 8px;
+    }
+
+    .badge-blue {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .badge-green {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .badge-purple {
+      background: #e9d5ff;
+      color: #6b21a8;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .info-panel {
+      animation: fadeIn 0.5s ease;
+    }
+
+    /* 自定义滚动条 */
+    .info-panel::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .info-panel::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 3px;
+    }
+
+    .info-panel::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+
+    .info-panel::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 1200px) {
+      .container {
+        flex-direction: column;
+      }
+
+      .info-panel {
+        width: 100%;
+        max-height: 300px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎨 现代化思维导图 + 任务管理</h1>
+    <p>基于 simple-mind-map 的现代化主题和任务勾选框功能演示 | Modern Theme with Task Checkbox</p>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="addTask()">➕ 添加任务节点</button>
+    <button class="btn btn-success" onclick="toggleSelectedTask()">✓ 切换勾选</button>
+    <button class="btn btn-secondary" onclick="expandAll()">📂 展开全部</button>
+    <button class="btn btn-secondary" onclick="collapseAll()">📁 收起全部</button>
+    <button class="btn btn-warning" onclick="exportImage()">💾 导出图片</button>
+    <button class="btn btn-secondary" onclick="resetView()">🔄 重置视图</button>
+  </div>
+
+  <div class="container">
+    <div class="mind-map-wrapper">
+      <div id="mindMapContainer"></div>
+    </div>
+
+    <div class="info-panel">
+      <h3>功能说明</h3>
+      
+      <div class="info-section">
+        <h4>🎯 任务勾选框</h4>
+        <ul>
+          <li>点击节点前的勾选框可切换任务状态</li>
+          <li>叶子节点显示方形勾选框</li>
+          <li>父节点显示圆形进度指示器</li>
+          <li>进度自动根据子节点完成度计算</li>
+        </ul>
+        <span class="badge badge-green">已启用</span>
+      </div>
+
+      <div class="info-section">
+        <h4>🎨 现代化主题特性</h4>
+        <ul>
+          <li>类 React Flow 的简约风格</li>
+          <li>Tailwind CSS 配色方案</li>
+          <li>柔和的圆角和阴影效果</li>
+          <li>优雅的曲线连接线</li>
+          <li>现代系统字体栈</li>
+        </ul>
+        <span class="badge badge-blue">Modern 主题</span>
+      </div>
+
+      <div class="info-section">
+        <h4>⌨️ 快捷键</h4>
+        <ul>
+          <li><strong>Tab</strong> - 添加子节点</li>
+          <li><strong>Enter</strong> - 添加同级节点</li>
+          <li><strong>Delete</strong> - 删除节点</li>
+          <li><strong>Ctrl+C/V</strong> - 复制/粘贴</li>
+          <li><strong>Ctrl+Z/Y</strong> - 撤销/重做</li>
+          <li><strong>方向键</strong> - 导航节点</li>
+        </ul>
+        <span class="badge badge-purple">键盘导航</span>
+      </div>
+
+      <div class="info-section">
+        <h4>📋 示例数据</h4>
+        <ul>
+          <li>项目包含多个阶段任务</li>
+          <li>每个阶段有具体的子任务</li>
+          <li>可以勾选完成任务项</li>
+          <li>父节点显示完成进度</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="./dist/js/chunk-vendors.js"></script>
+  <script src="./dist/js/app.js"></script>
+  <script>
+    let mindMap = null
+
+    // 初始化思维导图
+    function initMindMap() {
+      // 示例数据 - 项目管理任务
+      const data = {
+        data: {
+          text: '项目开发计划',
+          taskChecked: false
+        },
+        children: [
+          {
+            data: {
+              text: '需求分析阶段',
+              taskChecked: false
+            },
+            children: [
+              {
+                data: {
+                  text: '收集用户需求',
+                  taskChecked: true
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '编写需求文档',
+                  taskChecked: true
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '需求评审会议',
+                  taskChecked: false
+                },
+                children: []
+              }
+            ]
+          },
+          {
+            data: {
+              text: '设计阶段',
+              taskChecked: false
+            },
+            children: [
+              {
+                data: {
+                  text: 'UI/UX 设计',
+                  taskChecked: true
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '数据库设计',
+                  taskChecked: true
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: 'API 接口设计',
+                  taskChecked: false
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '系统架构设计',
+                  taskChecked: false
+                },
+                children: []
+              }
+            ]
+          },
+          {
+            data: {
+              text: '开发阶段',
+              taskChecked: false
+            },
+            children: [
+              {
+                data: {
+                  text: '前端开发',
+                  taskChecked: false
+                },
+                children: [
+                  {
+                    data: {
+                      text: '页面组件开发',
+                      taskChecked: false
+                    },
+                    children: []
+                  },
+                  {
+                    data: {
+                      text: '状态管理实现',
+                      taskChecked: false
+                    },
+                    children: []
+                  }
+                ]
+              },
+              {
+                data: {
+                  text: '后端开发',
+                  taskChecked: false
+                },
+                children: [
+                  {
+                    data: {
+                      text: 'API 接口实现',
+                      taskChecked: false
+                    },
+                    children: []
+                  },
+                  {
+                    data: {
+                      text: '数据库实现',
+                      taskChecked: false
+                    },
+                    children: []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            data: {
+              text: '测试阶段',
+              taskChecked: false
+            },
+            children: [
+              {
+                data: {
+                  text: '单元测试',
+                  taskChecked: false
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '集成测试',
+                  taskChecked: false
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '性能测试',
+                  taskChecked: false
+                },
+                children: []
+              }
+            ]
+          },
+          {
+            data: {
+              text: '上线部署',
+              taskChecked: false
+            },
+            children: [
+              {
+                data: {
+                  text: '准备生产环境',
+                  taskChecked: false
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '部署应用',
+                  taskChecked: false
+                },
+                children: []
+              },
+              {
+                data: {
+                  text: '监控和维护',
+                  taskChecked: false
+                },
+                children: []
+              }
+            ]
+          }
+        ]
+      }
+
+      // 创建思维导图实例
+      mindMap = new window.MindMap({
+        el: document.getElementById('mindMapContainer'),
+        data: data,
+        theme: 'modern', // 使用现代化主题
+        layout: 'logicalStructure',
+        enableFreeDrag: false,
+        mousewheelAction: 'zoom',
+        mouseScaleCenterUseMousePosition: true,
+        // 使用自定义节点内容，添加勾选框
+        createNodePrefixContent: (node) => {
+          // 使用 TaskCheckbox 插件创建勾选框
+          if (mindMap.taskCheckbox) {
+            return mindMap.taskCheckbox.createCheckboxContent(node)
+          }
+          return null
+        }
+      })
+
+      // 监听事件
+      mindMap.on('node_click', (node) => {
+        console.log('节点点击:', node.nodeData.data)
+      })
+
+      mindMap.on('data_change', () => {
+        console.log('数据变化')
+      })
+
+      console.log('思维导图初始化完成', mindMap)
+    }
+
+    // 添加任务节点
+    function addTask() {
+      const activeNodes = mindMap.renderer.activeNodeList
+      if (activeNodes.length === 0) {
+        alert('请先选择一个节点')
+        return
+      }
+      
+      const node = activeNodes[0]
+      mindMap.execCommand('INSERT_CHILD_NODE', false, null, node, {
+        text: '新任务',
+        taskChecked: false
+      })
+    }
+
+    // 切换选中节点的勾选状态
+    function toggleSelectedTask() {
+      const activeNodes = mindMap.renderer.activeNodeList
+      if (activeNodes.length === 0) {
+        alert('请先选择一个节点')
+        return
+      }
+
+      const node = activeNodes[0]
+      if (mindMap.taskCheckbox) {
+        mindMap.taskCheckbox.toggleCheckbox(node)
+      }
+    }
+
+    // 展开全部
+    function expandAll() {
+      mindMap.execCommand('EXPAND_ALL')
+    }
+
+    // 收起全部
+    function collapseAll() {
+      mindMap.execCommand('UNEXPAND_ALL')
+    }
+
+    // 导出图片
+    function exportImage() {
+      mindMap.export('png', true, '思维导图-现代化主题')
+    }
+
+    // 重置视图
+    function resetView() {
+      mindMap.view.reset()
+    }
+
+    // 页面加载完成后初始化
+    window.addEventListener('load', () => {
+      initMindMap()
+    })
+  </script>
+</body>
+</html>
+

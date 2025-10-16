@@ -20,6 +20,7 @@ import Demonstrate from './src/plugins/Demonstrate.js'
 import OuterFrame from './src/plugins/OuterFrame.js'
 import MindMapLayoutPro from './src/plugins/MindMapLayoutPro.js'
 import NodeBase64ImageStorage from './src/plugins/NodeBase64ImageStorage.js'
+import TaskCheckbox from './src/plugins/TaskCheckbox.js'
 import xmind from './src/parse/xmind.js'
 import markdown from './src/parse/markdown.js'
 import icons from './src/svg/icons.js'
@@ -54,5 +55,6 @@ MindMap.usePlugin(MiniMap)
   .usePlugin(OuterFrame)
   .usePlugin(MindMapLayoutPro)
   .usePlugin(NodeBase64ImageStorage)
+  .usePlugin(TaskCheckbox)
 
 export default MindMap
