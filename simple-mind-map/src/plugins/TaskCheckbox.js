@@ -12,12 +12,21 @@ class TaskCheckbox {
     this.updateAllCheckboxes = this.updateAllCheckboxes.bind(this)
     this.handleNodeTreeRenderEnd = this.handleNodeTreeRenderEnd.bind(this)
     this.handleDataChange = this.handleDataChange.bind(this)
+    this.handleNodeActive = this.handleNodeActive.bind(this)
     
     // 监听节点创建内容事件
     this.mindMap.on('node_tree_render_end', this.handleNodeTreeRenderEnd)
     
-    // 监听数据变化
+    // 监听数据变化（包括新增、删除子节点）
     this.mindMap.on('data_change', this.handleDataChange)
+    
+    // 监听节点激活事件（节点被编辑或添加子节点时）
+    this.mindMap.on('node_active', this.handleNodeActive)
+    
+    // 延迟初始化，确保节点树已经渲染
+    setTimeout(() => {
+      this.updateAllCheckboxes()
+    }, 100)
   }
 
   /**
@@ -31,7 +40,21 @@ class TaskCheckbox {
    * 处理数据变化事件
    */
   handleDataChange() {
-    this.updateAllCheckboxes()
+    // 延迟更新，确保DOM已经更新
+    setTimeout(() => {
+      this.updateAllCheckboxes()
+      this.mindMap.render()
+    }, 50)
+  }
+
+  /**
+   * 处理节点激活事件
+   */
+  handleNodeActive() {
+    // 节点激活时也更新勾选框
+    setTimeout(() => {
+      this.updateAllCheckboxes()
+    }, 50)
   }
 
   /**
@@ -40,6 +63,7 @@ class TaskCheckbox {
   beforePluginRemove() {
     this.mindMap.off('node_tree_render_end', this.handleNodeTreeRenderEnd)
     this.mindMap.off('data_change', this.handleDataChange)
+    this.mindMap.off('node_active', this.handleNodeActive)
   }
 
   /**
@@ -110,10 +134,15 @@ class TaskCheckbox {
    * @returns {Object} 勾选框元素信息
    */
   createCheckboxContent(node) {
-    const nodeData = node.nodeData.data
-    const hasChildren = node.nodeData.children && node.nodeData.children.length > 0
-    const checked = nodeData.taskChecked === true
-    const completion = nodeData._completion || { total: 0, completed: 0, percentage: 0 }
+    const nodeData = node.nodeData
+    const hasChildren = nodeData.children && nodeData.children.length > 0
+    const checked = nodeData.data.taskChecked === true
+    
+    // 在创建勾选框前先计算完成度
+    let completion = { total: 0, completed: 0, percentage: 0 }
+    if (hasChildren) {
+      completion = this.calculateCompletion(nodeData)
+    }
 
     // 创建一个 div 容器
     const container = document.createElement('div')
@@ -121,12 +150,17 @@ class TaskCheckbox {
     container.style.height = this.checkboxSize + 'px'
     container.style.display = 'inline-block'
     container.style.cursor = 'pointer'
+    container.style.verticalAlign = 'top'  // 改为 top，避免显示不全
+    container.style.marginRight = this.checkboxMargin + 'px'
+    container.style.position = 'relative'
     
     // 创建 SVG 元素
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     svg.setAttribute('width', this.checkboxSize)
     svg.setAttribute('height', this.checkboxSize)
     svg.setAttribute('viewBox', `0 0 ${this.checkboxSize} ${this.checkboxSize}`)
+    svg.style.display = 'block'  // 确保SVG完整显示
+    svg.style.overflow = 'visible'  // 允许内容溢出
     
     if (hasChildren && completion.total > 0) {
       // 父节点：显示圆形进度
@@ -147,7 +181,7 @@ class TaskCheckbox {
     // 返回符合 createNodePrefixContent 要求的对象格式
     return {
       el: container,  // DOM 元素
-      width: this.checkboxSize,
+      width: this.checkboxSize + this.checkboxMargin,
       height: this.checkboxSize
     }
   }
@@ -247,44 +281,52 @@ class TaskCheckbox {
    * @param {Object} node - 节点实例
    */
   toggleCheckbox(node) {
-    const nodeData = node.nodeData.data
-    const hasChildren = node.nodeData.children && node.nodeData.children.length > 0
+    const nodeData = node.nodeData
+    const hasChildren = nodeData.children && nodeData.children.length > 0
 
     if (!hasChildren) {
       // 叶子节点：切换自身状态
-      const newState = !nodeData.taskChecked
+      const newState = !nodeData.data.taskChecked
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         taskChecked: newState
       })
     } else {
-      // 父节点：切换所有子节点状态
-      const completion = nodeData._completion || { percentage: 0 }
+      // 父节点：根据当前完成度决定是全部勾选还是全部取消
+      const completion = this.calculateCompletion(nodeData)
       const newState = completion.percentage < 100 // 如果未完全完成，则全部勾选；否则全部取消
-      this.toggleAllChildren(node, newState)
+      this.setAllChildrenState(node, newState)
     }
 
-    // 触发重新渲染
+    // 强制重新计算所有节点的完成度并重新渲染
+    this.updateAllCheckboxes()
     this.mindMap.render()
   }
 
   /**
-   * 递归切换所有子节点
+   * 递归设置所有后代节点（叶子节点）的勾选状态
    * @param {Object} node - 节点实例
    * @param {Boolean} state - 目标状态
    */
-  toggleAllChildren(node, state) {
-    if (!node.nodeData.children || node.nodeData.children.length === 0) {
-      // 叶子节点，设置状态
-      this.mindMap.execCommand('SET_NODE_DATA', node, {
-        taskChecked: state
-      })
-      return
+  setAllChildrenState(node, state) {
+    const walk = (currentNode) => {
+      const hasChildren = currentNode.nodeData.children && currentNode.nodeData.children.length > 0
+      
+      if (!hasChildren) {
+        // 叶子节点，设置状态
+        this.mindMap.execCommand('SET_NODE_DATA', currentNode, {
+          taskChecked: state
+        })
+      } else {
+        // 父节点，递归处理所有子节点
+        if (currentNode.children && currentNode.children.length > 0) {
+          currentNode.children.forEach(child => {
+            walk(child)
+          })
+        }
+      }
     }
-
-    // 递归处理子节点
-    node.children.forEach(child => {
-      this.toggleAllChildren(child, state)
-    })
+    
+    walk(node)
   }
 
   /**
