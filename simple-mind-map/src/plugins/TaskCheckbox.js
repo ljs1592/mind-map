@@ -24,20 +24,12 @@ class TaskCheckbox {
     this.createCheckboxContent = this.createCheckboxContent.bind(this)
     this.handleBeforeShowTextEdit = this.handleBeforeShowTextEdit.bind(this)
     this.handleKeyDown = this.handleKeyDown.bind(this)
-    this.handleNodeActive = this.handleNodeActive.bind(this)
-    this.handleDataChange = this.handleDataChange.bind(this)
     
     // 设置 createNodePrefixContent 配置
     this.mindMap.opt.createNodePrefixContent = this.createCheckboxContent
     
     // 监听文本编辑前事件，防止点击勾选框时触发编辑
     this.mindMap.on('before_show_text_edit', this.handleBeforeShowTextEdit)
-    
-    // 监听节点激活事件（节点添加/删除后会触发）
-    this.mindMap.on('node_active', this.handleNodeActive)
-    
-    // 监听数据变化事件
-    this.mindMap.on('data_change', this.handleDataChange)
     
     // 监听键盘事件，实现 Ctrl+F 快捷键
     document.addEventListener('keydown', this.handleKeyDown)
@@ -62,56 +54,14 @@ class TaskCheckbox {
   }
 
   /**
-   * 处理节点激活事件
-   * 当节点添加、删除或结构变化时触发
-   */
-  handleNodeActive(node, activeNodeList) {
-    // 节点激活可能是添加、删除、选中等操作
-    // 使用防抖，避免频繁重渲染
-    this.scheduleReRender()
-  }
-
-  /**
-   * 处理数据变化事件
-   * 当节点数据变化时触发
-   */
-  handleDataChange(data) {
-    // 数据变化时重新渲染
-    // 使用防抖，避免频繁重渲染
-    this.scheduleReRender()
-  }
-
-  /**
-   * 计划重新渲染（防抖）
-   * 避免短时间内多次重渲染
-   */
-  scheduleReRender() {
-    if (this.reRenderTimer) {
-      clearTimeout(this.reRenderTimer)
-    }
-    this.reRenderTimer = setTimeout(() => {
-      this.reRenderTree()
-      this.reRenderTimer = null
-    }, 200)
-  }
-
-  /**
    * 插件被移除前调用的钩子
    */
   beforePluginRemove() {
-    // 清理定时器
-    if (this.reRenderTimer) {
-      clearTimeout(this.reRenderTimer)
-      this.reRenderTimer = null
-    }
-    
     // 清理状态缓存
     this.nodeStateCache.clear()
     
     // 移除事件监听
     this.mindMap.off('before_show_text_edit', this.handleBeforeShowTextEdit)
-    this.mindMap.off('node_active', this.handleNodeActive)
-    this.mindMap.off('data_change', this.handleDataChange)
     document.removeEventListener('keydown', this.handleKeyDown)
     
     // 清理配置
