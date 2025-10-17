@@ -16,6 +16,10 @@ class TaskCheckbox {
     this.checkboxMargin = 8
     this.filterMode = 'all' // 'all', 'uncompleted', 'completed'
     
+    // 用于跟踪节点的上一次状态，避免重复播放动画
+    // key: node.uid, value: { checked: boolean, percentage: number }
+    this.nodeStateCache = new Map()
+    
     // 绑定方法到当前实例，确保 this 上下文正确
     this.createCheckboxContent = this.createCheckboxContent.bind(this)
     this.handleBeforeShowTextEdit = this.handleBeforeShowTextEdit.bind(this)
@@ -100,6 +104,9 @@ class TaskCheckbox {
       clearTimeout(this.reRenderTimer)
       this.reRenderTimer = null
     }
+    
+    // 清理状态缓存
+    this.nodeStateCache.clear()
     
     // 移除事件监听
     this.mindMap.off('before_show_text_edit', this.handleBeforeShowTextEdit)
@@ -193,6 +200,31 @@ class TaskCheckbox {
       }
     }
 
+    // 检查状态是否改变，决定是否播放动画
+    const nodeUid = node.uid
+    const prevState = this.nodeStateCache.get(nodeUid)
+    let shouldAnimate = false
+    
+    if (!prevState) {
+      // 首次渲染，不播放动画（节点可能本来就是完成状态）
+      shouldAnimate = false
+    } else {
+      // 状态发生改变时才播放动画
+      if (hasChildren) {
+        // 父节点：检查完成度是否变为 100%
+        shouldAnimate = prevState.percentage !== 100 && completion.percentage === 100
+      } else {
+        // 叶子节点：检查是否从未勾选变为勾选
+        shouldAnimate = !prevState.checked && checked
+      }
+    }
+    
+    // 更新状态缓存
+    this.nodeStateCache.set(nodeUid, {
+      checked: checked,
+      percentage: completion.percentage
+    })
+
     // 创建一个 div 容器
     const container = document.createElement('div')
     container.className = 'task-checkbox-container'
@@ -215,10 +247,10 @@ class TaskCheckbox {
     
     if (hasChildren) {
       // 父节点：显示圆形进度
-      this.renderProgressCircle(svg, completion.percentage)
+      this.renderProgressCircle(svg, completion.percentage, shouldAnimate)
     } else {
       // 叶子节点：显示勾选框
-      this.renderCheckbox(svg, checked)
+      this.renderCheckbox(svg, checked, shouldAnimate)
     }
     
     container.appendChild(svg)
@@ -268,8 +300,9 @@ class TaskCheckbox {
    * 渲染勾选框（叶子节点）
    * @param {SVGElement} svg - SVG 容器元素
    * @param {Boolean} checked - 是否勾选
+   * @param {Boolean} shouldAnimate - 是否播放动画
    */
-  renderCheckbox(svg, checked) {
+  renderCheckbox(svg, checked, shouldAnimate = false) {
     const size = this.checkboxSize
 
     // 清空SVG内容
@@ -292,7 +325,7 @@ class TaskCheckbox {
 
     svg.appendChild(rect)
 
-    // 如果已勾选，添加对勾，带动画效果
+    // 如果已勾选，添加对勾
     if (checked) {
       const checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
       checkPath.setAttribute('d', 'M4,9 L7,12 L14,5')
@@ -302,27 +335,29 @@ class TaskCheckbox {
       checkPath.setAttribute('stroke-linecap', 'round')
       checkPath.setAttribute('stroke-linejoin', 'round')
       
-      // 添加路径动画
-      const pathLength = checkPath.getTotalLength ? checkPath.getTotalLength() : 20
-      checkPath.style.strokeDasharray = pathLength
-      checkPath.style.strokeDashoffset = pathLength
-      checkPath.style.animation = 'checkmark 0.3s ease forwards'
+      // 只有在状态改变时才添加动画
+      if (shouldAnimate) {
+        const pathLength = checkPath.getTotalLength ? checkPath.getTotalLength() : 20
+        checkPath.style.strokeDasharray = pathLength
+        checkPath.style.strokeDashoffset = pathLength
+        checkPath.style.animation = 'checkmark 0.3s ease forwards'
+        
+        // 添加动画样式
+        if (!document.getElementById('task-checkbox-animations')) {
+          const style = document.createElement('style')
+          style.id = 'task-checkbox-animations'
+          style.textContent = `
+            @keyframes checkmark {
+              to {
+                stroke-dashoffset: 0;
+              }
+            }
+          `
+          document.head.appendChild(style)
+        }
+      }
       
       svg.appendChild(checkPath)
-      
-      // 添加动画样式
-      if (!document.getElementById('task-checkbox-animations')) {
-        const style = document.createElement('style')
-        style.id = 'task-checkbox-animations'
-        style.textContent = `
-          @keyframes checkmark {
-            to {
-              stroke-dashoffset: 0;
-            }
-          }
-        `
-        document.head.appendChild(style)
-      }
     }
   }
 
@@ -330,8 +365,9 @@ class TaskCheckbox {
    * 渲染进度圆圈（父节点）
    * @param {SVGElement} svg - SVG 容器元素
    * @param {Number} percentage - 完成百分比
+   * @param {Boolean} shouldAnimate - 是否播放动画
    */
-  renderProgressCircle(svg, percentage) {
+  renderProgressCircle(svg, percentage, shouldAnimate = false) {
     const size = this.checkboxSize
     const radius = size / 2 - 2
     const center = size / 2
@@ -376,34 +412,38 @@ class TaskCheckbox {
     // 完成时显示对勾
     if (percentage === 100) {
       const checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      checkPath.setAttribute('d', `M${center - 3},${center} L${center - 1},${center + 2} L${center + 3},${center - 2}`)
+      // 使用相对于 center 的坐标，确保对勾清晰可见
+      // 对勾从左下到中间再到右上
+      checkPath.setAttribute('d', `M${center - 4},${center} L${center - 1},${center + 3} L${center + 4},${center - 3}`)
       checkPath.setAttribute('fill', 'none')
       checkPath.setAttribute('stroke', '#10b981')
       checkPath.setAttribute('stroke-width', 2)
       checkPath.setAttribute('stroke-linecap', 'round')
       checkPath.setAttribute('stroke-linejoin', 'round')
       
-      // 添加对勾动画
-      checkPath.style.animation = 'checkmark 0.3s ease 0.2s forwards'
-      checkPath.style.opacity = '0'
-      checkPath.style.animationFillMode = 'forwards'
+      // 只有在状态改变时才添加动画
+      if (shouldAnimate) {
+        const pathLength = checkPath.getTotalLength ? checkPath.getTotalLength() : 20
+        checkPath.style.strokeDasharray = pathLength
+        checkPath.style.strokeDashoffset = pathLength
+        checkPath.style.animation = 'checkmark 0.3s ease 0.2s forwards'
+        
+        // 确保动画样式存在
+        if (!document.getElementById('task-checkbox-animations')) {
+          const style = document.createElement('style')
+          style.id = 'task-checkbox-animations'
+          style.textContent = `
+            @keyframes checkmark {
+              to {
+                stroke-dashoffset: 0;
+              }
+            }
+          `
+          document.head.appendChild(style)
+        }
+      }
       
       svg.appendChild(checkPath)
-      
-      // 确保动画样式存在
-      if (!document.getElementById('task-checkbox-animations')) {
-        const style = document.createElement('style')
-        style.id = 'task-checkbox-animations'
-        style.textContent = `
-          @keyframes checkmark {
-            to {
-              stroke-dashoffset: 0;
-              opacity: 1;
-            }
-          }
-        `
-        document.head.appendChild(style)
-      }
     }
   }
 
