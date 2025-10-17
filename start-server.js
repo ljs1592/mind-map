@@ -58,11 +58,7 @@ server.listen(PORT, () => {
   console.log('\n🎉 本地服务器已启动！\n');
   console.log(`📂 服务目录: ${__dirname}`);
   console.log(`🌐 访问地址:\n`);
-  console.log(`   主页（推荐）:            http://localhost:${PORT}/`);
-  console.log(`   示例页面 1:              http://localhost:${PORT}/example-modern-task.html`);
-  console.log(`   示例页面 2:              http://localhost:${PORT}/index-modern-example.html`);
-  console.log(`   完整演示:                http://localhost:${PORT}/demo-modern-task.html`);
-  console.log(`   原始 index:              http://localhost:${PORT}/index.html`);
+  console.log(`   主页（推荐）:            http://localhost:${PORT}/standalone-demo.html`);
   console.log('\n💡 提示: 按 Ctrl+C 停止服务器\n');
 });
 
