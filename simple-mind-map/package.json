@@ -1,6 +1,6 @@
 {
   "name": "@ljs1592/simple-mind-map",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "一个简单的web在线思维导图",
   "authors": [
     {
@@ -31,8 +31,8 @@
     "dist",
     "types"
   ],
-  "module": "index.js",
-  "main": "./dist/simpleMindMap.umd.min.js",
+  "module": "./dist/simpleMindMap.esm.min.js",
+  "main": "./dist/simpleMindMap.esm.min.js",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/"
   },
