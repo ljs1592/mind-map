@@ -1,0 +1,37 @@
+name: Publish package to GitHub Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://npm.pkg.github.com/'
+
+      - name: Install web dependencies
+        run: npm ci --prefix ./web
+
+      - name: Build library (web -> simple-mind-map/dist)
+        run: npm run buildLibrary --prefix ./web
+
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ./simple-mind-map
+          npm publish --registry https://npm.pkg.github.com/
