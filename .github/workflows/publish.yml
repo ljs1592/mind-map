@@ -26,6 +26,9 @@ jobs:
       - name: Install web dependencies
         run: npm ci --prefix ./web
 
+      - name: Install simple-mind-map dependencies
+        run: npm ci --prefix ./simple-mind-map
+
       - name: Build library (web -> simple-mind-map/dist)
         run: npm run buildLibrary --prefix ./web
 
