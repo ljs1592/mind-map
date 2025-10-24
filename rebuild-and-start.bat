@@ -44,6 +44,7 @@ echo ✅ 库构建成功
 echo.
 
 echo [4/5] 构建 web 应用...
+@REM echo ====跳过构建web应用====,需要时再修改脚本
 call npm run build
 if errorlevel 1 (
     echo ❌ 错误: 应用构建失败
@@ -60,13 +61,6 @@ echo [5/5] 启动开发服务器...
 echo.
 echo ========================================
 echo 🎉 构建完成！正在启动服务器...
-echo ========================================
-echo.
-echo 请在浏览器中访问:
-echo 🌟 推荐: http://localhost:8888/standalone-demo.html
-echo 📱 主页: http://localhost:8888/
-echo.
-echo 按 Ctrl+C 停止服务器
 echo ========================================
 echo.
 

@@ -20,6 +20,9 @@ class TaskCheckbox {
     // key: node.uid, value: { checked: boolean, percentage: number }
     this.nodeStateCache = new Map()
     
+    // 标志位：防止在 onNodeTreeRenderEnd 中循环触发渲染
+    this.isUpdatingFromEvent = false
+    
     // 绑定方法到当前实例，确保 this 上下文正确
     this.createCheckboxContent = this.createCheckboxContent.bind(this)
     this.handleBeforeShowTextEdit = this.handleBeforeShowTextEdit.bind(this)
@@ -31,6 +34,13 @@ class TaskCheckbox {
     // 监听文本编辑前事件，防止点击勾选框时触发编辑
     this.mindMap.on('before_show_text_edit', this.handleBeforeShowTextEdit)
     
+    // 当节点树渲染结束或数据变更后，刷新所有节点的前置勾选内容
+    this.onNodeTreeRenderEnd = this.onNodeTreeRenderEnd.bind(this)
+    this.mindMap.on('node_tree_render_end', this.onNodeTreeRenderEnd)
+    // 仅作为兜底：某些数据更新触发但未引发布局变化时，仍保证刷新
+    this.onDataChange = this.onDataChange.bind(this)
+    this.mindMap.on('data_change', this.onDataChange)
+
     // 监听键盘事件，实现 Ctrl+F 快捷键
     document.addEventListener('keydown', this.handleKeyDown)
   }
@@ -62,6 +72,8 @@ class TaskCheckbox {
     
     // 移除事件监听
     this.mindMap.off('before_show_text_edit', this.handleBeforeShowTextEdit)
+    this.mindMap.off('node_tree_render_end', this.onNodeTreeRenderEnd)
+    this.mindMap.off('data_change', this.onDataChange)
     document.removeEventListener('keydown', this.handleKeyDown)
     
     // 清理配置
@@ -169,10 +181,11 @@ class TaskCheckbox {
       }
     }
     
-    // 更新状态缓存
+    // 更新状态缓存（包括节点类型信息）
     this.nodeStateCache.set(nodeUid, {
       checked: checked,
-      percentage: completion.percentage
+      percentage: completion.percentage,
+      wasParent: hasChildren
     })
 
     // 创建一个 div 容器
@@ -472,7 +485,7 @@ class TaskCheckbox {
   /**
    * 重新渲染整棵节点树
    */
-  reRenderTree() {
+  reRenderTree(requestRender = true) {
     if (!this.mindMap.renderer || !this.mindMap.renderer.root) {
       return
     }
@@ -500,8 +513,10 @@ class TaskCheckbox {
     
     walk(root)
     
-    // 触发完整渲染
-    this.mindMap.render()
+    // 触发完整渲染（可选）
+    if (requestRender) {
+      this.mindMap.render()
+    }
   }
 
   /**
@@ -520,6 +535,136 @@ class TaskCheckbox {
     
     // 然后计算当前节点
     this.calculateCompletion(nodeData)
+  }
+
+  /**
+   * 节点树渲染完成后的回调：
+   * 用于在新增/删除/移动节点导致的结构变化后，
+   * 刷新所有节点的前置勾选内容与完成度显示。
+   * 
+   * 策略：
+   * 1. 重新计算所有节点的完成度
+   * 2. 手动更新所有勾选框的显示（不重新创建DOM）
+   * 3. 如果节点类型发生变化（父节点↔叶子节点），需要重新创建前置内容
+   */
+  onNodeTreeRenderEnd() {
+    if (!this.mindMap.renderer || !this.mindMap.renderer.root || this.isUpdatingFromEvent) {
+      return
+    }
+    
+    this.isUpdatingFromEvent = true
+    
+    try {
+      // 重新计算所有节点的完成度
+      this.recalculateAllCompletion(this.mindMap.renderer.root.nodeData)
+      
+      // 检查是否有节点类型发生变化（需要完整重建）
+      let needFullRebuild = false
+      
+      // 遍历所有节点，手动更新勾选框显示
+      const updateCheckboxDisplay = (node) => {
+        if (!node) return
+        
+        // 如果节点没有前置内容，标记需要完整重建
+        if (!node._prefixData || !node._prefixData.el) {
+          needFullRebuild = true
+          if (node.children && node.children.length > 0) {
+            node.children.forEach(child => updateCheckboxDisplay(child))
+          }
+          return
+        }
+        
+        const nodeData = node.nodeData
+        const hasChildren = nodeData.children && nodeData.children.length > 0
+        
+        // 获取节点的上一次状态（用于判断是否从父节点变为叶子节点）
+        const prevState = this.nodeStateCache.get(node.uid)
+        
+        // 检查节点类型是否发生变化
+        const wasParentNode = prevState && prevState.wasParent
+        if (wasParentNode !== hasChildren) {
+          // 节点类型发生变化（父节点↔叶子节点），需要完整重建
+          needFullRebuild = true
+        }
+        
+        // 特殊处理：如果节点从父节点变为叶子节点，需要设置其 taskChecked 状态
+        if (!hasChildren && wasParentNode && prevState) {
+          if (!nodeData.data) nodeData.data = {}
+          
+          // 节点从父节点变为叶子节点，无条件根据之前的完成度更新 taskChecked
+          // 100% 完成 → 勾选，未完成 → 不勾选
+          nodeData.data.taskChecked = prevState.percentage === 100
+        }
+        
+        const checked = nodeData.data && nodeData.data.taskChecked === true
+        
+        // 计算完成度
+        let completion
+        if (hasChildren) {
+          completion = this.calculateCompletion(nodeData)
+        } else {
+          completion = {
+            total: 1,
+            completed: checked ? 1 : 0,
+            percentage: checked ? 100 : 0
+          }
+        }
+        
+        // 找到 SVG 元素并更新显示
+        const container = node._prefixData.el
+        const svg = container ? container.querySelector('svg') : null
+        if (svg) {
+          if (hasChildren) {
+            // 父节点：更新圆形进度
+            this.renderProgressCircle(svg, completion.percentage, false)
+          } else {
+            // 叶子节点：更新勾选框
+            this.renderCheckbox(svg, checked, false)
+          }
+          
+          // 更新 tooltip
+          const tooltipText = hasChildren 
+            ? `完成度: ${completion.percentage}% (${completion.completed}/${completion.total})`
+            : `状态: ${completion.percentage === 100 ? '已完成' : '未完成'}`
+          container.title = tooltipText
+          container.setAttribute('data-tooltip', tooltipText)
+        }
+        
+        // 更新状态缓存（包括节点类型信息）
+        this.nodeStateCache.set(node.uid, {
+          checked: checked,
+          percentage: completion.percentage,
+          wasParent: hasChildren
+        })
+        
+        // 递归处理子节点
+        if (node.children && node.children.length > 0) {
+          node.children.forEach(child => updateCheckboxDisplay(child))
+        }
+      }
+      
+      updateCheckboxDisplay(this.mindMap.renderer.root)
+      
+      // 如果需要完整重建，延迟触发一次渲染
+      if (needFullRebuild) {
+        setTimeout(() => {
+          if (!this.isUpdatingFromEvent) {
+            this.reRenderTree(true)
+          }
+        }, 10)
+      }
+    } finally {
+      this.isUpdatingFromEvent = false
+    }
+  }
+
+  /**
+   * 数据变化兜底回调（例如历史前进/后退或粘贴等场景）：
+   * 这里延迟到下一帧执行，确保在随后一次渲染后有机会刷新前置内容。
+   */
+  onDataChange() {
+    // 数据变化后，通常会触发渲染，渲染完成后会触发 onNodeTreeRenderEnd
+    // 所以这里不需要做额外处理，避免重复更新
   }
 
   /**
