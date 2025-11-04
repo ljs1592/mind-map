@@ -16,17 +16,30 @@ class TaskCheckbox {
     this.mindMap = mindMap
     this.checkboxSize = 18
     this.checkboxMargin = 8
-    this.filterMode = 'all' // 'all', 'uncompleted', 'completed'
+    
+    // 从配置项读取任务视图设置
+    this.viewEnabled = this.mindMap.opt.taskCheckboxViewEnabled !== false
     this.viewModes = this.initViewModes(
       Array.isArray(this.mindMap.opt.taskCheckboxViewModes)
         ? this.mindMap.opt.taskCheckboxViewModes
         : null
     )
+    
+    // 设置默认视图模式
+    const defaultMode = this.mindMap.opt.taskCheckboxDefaultViewMode || 'all'
+    this.filterMode = this.viewModes.includes(defaultMode) ? defaultMode : this.viewModes[0]
     this.viewModeIndex = this.viewModes.indexOf(this.filterMode)
     if (this.viewModeIndex < 0) {
       this.viewModeIndex = 0
       this.filterMode = this.viewModes[0]
     }
+    
+    // 从配置项读取动画参数
+    this.animationDelay = this.mindMap.opt.taskCheckboxAnimationDelay || 550
+    this.animationDuration = this.mindMap.opt.taskCheckboxAnimationDuration || 300
+    this.animationMoveDistance = this.mindMap.opt.taskCheckboxAnimationMoveDistance || 30
+    this.exitAnimationEasing = this.mindMap.opt.taskCheckboxExitAnimationEasing || '>'
+    this.enterAnimationEasing = this.mindMap.opt.taskCheckboxEnterAnimationEasing || '<'
     this.currentViewData = null
     this.fullDataCache = null
     this.uidToOriginalData = new Map()
@@ -563,7 +576,7 @@ class TaskCheckbox {
       (this.filterMode === 'uncompleted' || this.filterMode === 'completed')
 
     if (needExitAnimation) {
-      // 等待勾选框动画完成（500ms：勾选动画0.2s延迟+0.3s动画）后再开始节点退出动画
+      // 等待勾选框动画完成后再开始节点退出动画
       setTimeout(() => {
         this.animateNodesExit(removed)
           .then(() => {
@@ -582,7 +595,7 @@ class TaskCheckbox {
             }
             this.applyViewData(viewData, nextVisiblePreview)
           })
-      }, 550)
+      }, this.animationDelay)
     } else {
       if (added.length > 0) {
         this.pendingEnterUids = new Set(added)
@@ -863,6 +876,10 @@ class TaskCheckbox {
    * 模式：all（所有）→ uncompleted（未完成）→ completed（已完成）→ all
    */
   cycleFilterMode() {
+    if (!this.viewEnabled) {
+      console.warn('[TaskCheckbox] 任务视图功能已禁用')
+      return
+    }
     if (!Array.isArray(this.viewModes) || this.viewModes.length === 0) {
       return
     }
@@ -877,6 +894,10 @@ class TaskCheckbox {
    * @param {String} mode - 过滤模式：'all'（所有）、'uncompleted'（未完成）、'completed'（已完成）
    */
   setFilterMode(mode, options = {}) {
+    if (!this.viewEnabled) {
+      console.warn('[TaskCheckbox] 任务视图功能已禁用')
+      return
+    }
     if (!this.viewModes.includes(mode)) {
       console.warn('Invalid filter mode:', mode)
       return
@@ -1227,7 +1248,6 @@ class TaskCheckbox {
 
   animateNodesExit(uids) {
     if (!uids || uids.length === 0) return Promise.resolve()
-    const duration = 300
 
     console.log('[TaskCheckbox] 开始淡出动画，节点数:', uids.length)
 
@@ -1248,12 +1268,12 @@ class TaskCheckbox {
             // 停止之前的动画
             node.group.stop(true, true)
             
-            // 启动淡出+右移动画
+            // 启动淡出+右移动画（使用配置的参数）
             const animation = node.group
-              .animate(duration)
-              .ease('>')
+              .animate(this.animationDuration)
+              .ease(this.exitAnimationEasing)
               .opacity(0)
-              .dmove(30, 0)
+              .dmove(this.animationMoveDistance, 0)
             
             animations.push(
               new Promise(resolve => {
@@ -1290,7 +1310,6 @@ class TaskCheckbox {
 
   runPendingEnterAnimations() {
     if (!this.pendingEnterUids || this.pendingEnterUids.size === 0) return
-    const duration = 300
 
     // 延迟确保节点已经渲染
     setTimeout(() => {
@@ -1304,12 +1323,12 @@ class TaskCheckbox {
           if (typeof node.group.animate === 'function') {
             node.group.stop(true, true)
             node.group.opacity(0)
-            node.group.dmove(-30, 0)
+            node.group.dmove(-this.animationMoveDistance, 0)
             node.group
-              .animate(duration)
-              .ease('<')
+              .animate(this.animationDuration)
+              .ease(this.enterAnimationEasing)
               .opacity(1)
-              .dmove(30, 0)
+              .dmove(this.animationMoveDistance, 0)
           } else {
             node.group.opacity(1)
           }

@@ -519,5 +519,24 @@ export const defaultOpt = {
   // 默认为内置图标，你可以传递一个svg字符串，或者其他的html字符串
   // 整体大小请使用上面的minImgResizeWidth和minImgResizeHeight选项设置
   customDeleteBtnInnerHTML: '',
-  customResizeBtnInnerHTML: ''
+  customResizeBtnInnerHTML: '',
+
+  // 【TaskCheckbox】插件 - 任务视图功能配置
+  // 是否启用任务视图切换功能
+  taskCheckboxViewEnabled: true,
+  // 可用的任务视图模式，可选值：'all'（全部）, 'uncompleted'（未完成）, 'completed'（已完成）
+  // 示例：['all', 'uncompleted', 'completed'] 或 ['all', 'uncompleted'] 或 ['all', 'completed']
+  taskCheckboxViewModes: ['all', 'uncompleted', 'completed'],
+  // 默认任务视图模式
+  taskCheckboxDefaultViewMode: 'all',
+  // 勾选框动画完成后等待多久再开始节点退出动画（毫秒）
+  taskCheckboxAnimationDelay: 550,
+  // 节点淡出/淡入动画持续时间（毫秒）
+  taskCheckboxAnimationDuration: 300,
+  // 节点淡出时的水平移动距离（像素）
+  taskCheckboxAnimationMoveDistance: 30,
+  // 节点淡出动画的缓动函数，可选：'>'(ease-out), '<'(ease-in), '-'(linear), '='(ease-in-out)
+  taskCheckboxExitAnimationEasing: '>',
+  // 节点淡入动画的缓动函数
+  taskCheckboxEnterAnimationEasing: '<'
 }
