@@ -1,6 +1,6 @@
 {
   "name": "@ljs1592/simple-mind-map",
-  "version": "v1.0.10",
+  "version": "v1.0.11",
   "description": "一个简单的web在线思维导图",
   "authors": [
     {
@@ -29,7 +29,10 @@
   },
   "files": [
     "dist",
-    "types"
+    "types",
+    "src",
+    "index.js",
+    "full.js"
   ],
   "module": "./dist/simpleMindMap.esm.min.js",
   "main": "./dist/simpleMindMap.esm.min.js",
