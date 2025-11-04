@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>独立演示 - Modern 主题 + 任务勾选框</title>
+  <title>导图</title>
   <!-- 引入编译后的 CSS -->
   <link rel="stylesheet" href="./simple-mind-map/dist/simpleMindMap.esm.css">
   <style>
@@ -124,15 +124,16 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎨 独立演示 - Modern 主题 + 任务勾选框</h1>
-      <p>使用编译后的 simple-mind-map 库 | 包含 Modern 主题和 TaskCheckbox 插件</p>
-    </div>
+      <h1>🎨  </h1>
+<!--       <p>使用编译后的 simple-mind-map 库 | 包含 Modern 主题和 TaskCheckbox 插件</p>
+ -->    </div>
 
     <div class="toolbar">
       <button class="btn btn-primary" onclick="addTask()">➕ 添加任务</button>
       <button class="btn btn-success" onclick="toggleTask()">✓ 切换勾选</button>
       <button class="btn btn-secondary" onclick="expandAll()">📂 展开全部</button>
       <button class="btn btn-secondary" onclick="collapseAll()">📁 收起全部</button>
+      <button class="btn btn-secondary" onclick="switchTaskView()">🌓 切换任务视图</button>
       <button class="btn btn-secondary" onclick="fitView()">🔍 适应画布</button>
       <button class="btn btn-secondary" onclick="resetData()">🔄 重置数据</button>
     </div>
@@ -294,6 +295,12 @@
     window.fitView = function() {
       if (!window.mindMapInstance) return
       window.mindMapInstance.view.fit()
+    }
+
+    // 切换任务视图
+    window.switchTaskView = function() {
+      if (!window.mindMapInstance || !window.mindMapInstance.taskCheckbox) return
+      window.mindMapInstance.taskCheckbox.cycleFilterMode()
     }
 
     // 重置数据

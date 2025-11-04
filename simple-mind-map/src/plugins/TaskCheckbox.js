@@ -1,3 +1,5 @@
+import { simpleDeepClone, walk, createUid } from '../utils'
+
 /**
  * 任务勾选框插件
  * 支持节点的任务勾选功能，父节点会显示子节点的完成度
@@ -15,6 +17,27 @@ class TaskCheckbox {
     this.checkboxSize = 18
     this.checkboxMargin = 8
     this.filterMode = 'all' // 'all', 'uncompleted', 'completed'
+    this.viewModes = this.initViewModes(
+      Array.isArray(this.mindMap.opt.taskCheckboxViewModes)
+        ? this.mindMap.opt.taskCheckboxViewModes
+        : null
+    )
+    this.viewModeIndex = this.viewModes.indexOf(this.filterMode)
+    if (this.viewModeIndex < 0) {
+      this.viewModeIndex = 0
+      this.filterMode = this.viewModes[0]
+    }
+    this.currentViewData = null
+    this.fullDataCache = null
+    this.uidToOriginalData = new Map()
+    this.virtualRootUid = null
+    this.isUsingVirtualView = false
+    this.currentVisibleUidSet = new Set()
+    this.pendingEnterUids = new Set()
+    this.renderedNodeMap = new Map()
+    this.isLockingInteraction = false
+    this.cachedBeforeTextEdit = null
+    this.cachedReadonly = null
     
     // 用于跟踪节点的上一次状态，避免重复播放动画
     // key: node.uid, value: { checked: boolean, percentage: number }
@@ -45,6 +68,41 @@ class TaskCheckbox {
     document.addEventListener('keydown', this.handleKeyDown)
   }
 
+  initViewModes(viewModes) {
+    const availableModes = ['all', 'uncompleted', 'completed']
+    const defaultModes = ['all', 'uncompleted', 'completed']
+    if (!Array.isArray(viewModes) || viewModes.length === 0) {
+      return defaultModes
+    }
+    const cleaned = viewModes
+      .map(mode => {
+        if (typeof mode !== 'string') return ''
+        return mode.trim().toLowerCase()
+      })
+      .filter(mode => availableModes.includes(mode))
+
+    const unique = cleaned.filter((mode, index) => {
+      return cleaned.indexOf(mode) === index
+    })
+
+    if (unique.length === 0) {
+      return defaultModes
+    }
+
+    const comboCandidates = [
+      ['all', 'uncompleted', 'completed'],
+      ['all', 'uncompleted'],
+      ['all', 'completed']
+    ]
+
+    const matched = comboCandidates.find(candidate => {
+      if (candidate.length !== unique.length) return false
+      return candidate.every((mode, index) => mode === unique[index])
+    })
+
+    return matched || defaultModes
+  }
+
   /**
    * 处理文本编辑前事件
    */
@@ -67,6 +125,8 @@ class TaskCheckbox {
    * 插件被移除前调用的钩子
    */
   beforePluginRemove() {
+    this.restoreInteractionLock()
+    this.restoreOriginalView()
     // 清理状态缓存
     this.nodeStateCache.clear()
     
@@ -149,6 +209,7 @@ class TaskCheckbox {
     const nodeData = node.nodeData
     const hasChildren = nodeData.children && nodeData.children.length > 0
     const checked = nodeData.data && nodeData.data.taskChecked === true
+    this.renderedNodeMap.set(node.uid, node)
     
     // 在创建勾选框前先计算完成度
     let completion = { total: 0, completed: 0, percentage: 0 }
@@ -424,6 +485,11 @@ class TaskCheckbox {
     const nodeData = node.nodeData
     const hasChildren = nodeData.children && nodeData.children.length > 0
 
+    if (this.filterMode !== 'all' && this.fullDataCache) {
+      this.toggleCheckboxInVirtualView(node, hasChildren)
+      return
+    }
+
     if (!hasChildren) {
       // 叶子节点：切换自身状态
       const newState = !(nodeData.data && nodeData.data.taskChecked)
@@ -444,6 +510,87 @@ class TaskCheckbox {
     setTimeout(() => {
       this.reRenderTree()
     }, 10)
+  }
+
+  toggleCheckboxInVirtualView(node, hasChildren) {
+    const nodeUid = node.nodeData.data && node.nodeData.data.uid
+    if (!nodeUid) return
+    const sourceNode = this.uidToOriginalData.get(nodeUid)
+    if (!sourceNode) return
+
+    // 第一步：先预览性地更新勾选框视觉效果（触发勾选动画）
+    if (!hasChildren) {
+      const current = node.nodeData.data && node.nodeData.data.taskChecked === true
+      this.mindMap.execCommand('SET_NODE_DATA', node, {
+        taskChecked: !current
+      })
+    } else {
+      const completion = this.calculateCompletion(node.nodeData)
+      const targetState = completion.percentage < 100
+      this.setAllChildrenState(node, targetState)
+    }
+
+    // 立即重新渲染勾选框（触发打勾动画）
+    setTimeout(() => {
+      this.reRenderTree()
+    }, 10)
+
+    // 第二步：在后台准备数据变更
+    if (!hasChildren) {
+      const current = sourceNode.data && sourceNode.data.taskChecked === true
+      sourceNode.data = sourceNode.data || {}
+      sourceNode.data.taskChecked = !current
+    } else {
+      const completion = this.calculateCompletion(sourceNode)
+      const targetState = completion.percentage < 100
+      this.setAllDataChildrenState(sourceNode, targetState)
+    }
+
+    this.recalculateAllCompletion(this.fullDataCache)
+    this.refreshUidMap()
+    const previousVisible = new Set(this.currentVisibleUidSet)
+    const viewData = this.buildViewData(this.filterMode)
+    if (!viewData) return
+    const nextVisiblePreview = this.collectVisibleUids(viewData)
+    const removed = [...previousVisible].filter(
+      uid => !nextVisiblePreview.has(uid)
+    )
+    const added = [...nextVisiblePreview].filter(
+      uid => !previousVisible.has(uid)
+    )
+
+    const needExitAnimation = removed.length > 0 &&
+      (this.filterMode === 'uncompleted' || this.filterMode === 'completed')
+
+    if (needExitAnimation) {
+      // 等待勾选框动画完成（500ms：勾选动画0.2s延迟+0.3s动画）后再开始节点退出动画
+      setTimeout(() => {
+        this.animateNodesExit(removed)
+          .then(() => {
+            if (added.length > 0) {
+              this.pendingEnterUids = new Set(added)
+            } else {
+              this.pendingEnterUids.clear()
+            }
+            this.applyViewData(viewData, nextVisiblePreview)
+          })
+          .catch(() => {
+            if (added.length > 0) {
+              this.pendingEnterUids = new Set(added)
+            } else {
+              this.pendingEnterUids.clear()
+            }
+            this.applyViewData(viewData, nextVisiblePreview)
+          })
+      }, 550)
+    } else {
+      if (added.length > 0) {
+        this.pendingEnterUids = new Set(added)
+      } else {
+        this.pendingEnterUids.clear()
+      }
+      this.applyViewData(viewData, nextVisiblePreview)
+    }
   }
 
   /**
@@ -645,6 +792,19 @@ class TaskCheckbox {
       
       updateCheckboxDisplay(this.mindMap.renderer.root)
       
+      if (
+        !this.isUsingVirtualView &&
+        this.currentVisibleUidSet.size === 0 &&
+        this.mindMap.opt &&
+        this.mindMap.opt.data
+      ) {
+        this.currentVisibleUidSet = this.collectVisibleUids(
+          this.mindMap.opt.data
+        )
+      }
+
+      this.runPendingEnterAnimations()
+
       // 如果需要完整重建，延迟触发一次渲染
       if (needFullRebuild) {
         setTimeout(() => {
@@ -703,30 +863,464 @@ class TaskCheckbox {
    * 模式：all（所有）→ uncompleted（未完成）→ completed（已完成）→ all
    */
   cycleFilterMode() {
-    const modes = ['all', 'uncompleted', 'completed']
-    const currentIndex = modes.indexOf(this.filterMode)
-    const nextIndex = (currentIndex + 1) % modes.length
-    this.setFilterMode(modes[nextIndex])
+    if (!Array.isArray(this.viewModes) || this.viewModes.length === 0) {
+      return
+    }
+    this.viewModeIndex =
+      (this.viewModes.indexOf(this.filterMode) + 1) % this.viewModes.length
+    const nextMode = this.viewModes[this.viewModeIndex]
+    this.setFilterMode(nextMode)
   }
 
   /**
    * 设置过滤模式
    * @param {String} mode - 过滤模式：'all'（所有）、'uncompleted'（未完成）、'completed'（已完成）
    */
-  setFilterMode(mode) {
-    if (!['all', 'uncompleted', 'completed'].includes(mode)) {
+  setFilterMode(mode, options = {}) {
+    if (!this.viewModes.includes(mode)) {
       console.warn('Invalid filter mode:', mode)
       return
     }
-    
+
+    if (this.filterMode === mode && !options.force) {
+      return
+    }
+
+    const previousMode = this.filterMode
     this.filterMode = mode
-    this.applyFilter()
-    
-    // 触发事件通知外部
+    this.viewModeIndex = this.viewModes.indexOf(mode)
+
+    if (mode === 'all') {
+      this.restoreInteractionLock()
+      this.restoreOriginalView()
+    } else {
+      this.initFullDataCache()
+      if (!this.fullDataCache) {
+        console.warn('[TaskCheckbox] Failed to snapshot data for view mode')
+        return
+      }
+      if (mode === 'completed') {
+        this.lockInteractionsForCompleted()
+      } else {
+        this.restoreInteractionLock()
+      }
+      this.applyVirtualView()
+    }
+
     this.mindMap.emit('taskCheckboxFilterChanged', { mode })
-    
-    // 显示提示信息
     this.showFilterNotification(mode)
+  }
+
+  initFullDataCache() {
+    if (this.fullDataCache) {
+      return
+    }
+    const snapshot = this.mindMap.command.getCopyData()
+    if (!snapshot) {
+      return
+    }
+    this.fullDataCache = simpleDeepClone(snapshot)
+    this.refreshUidMap()
+    this.recalculateAllCompletion(this.fullDataCache)
+  }
+
+  refreshUidMap() {
+    this.uidToOriginalData.clear()
+    if (!this.fullDataCache) return
+    walk(
+      this.fullDataCache,
+      null,
+      node => {
+        if (node && node.data && node.data.uid) {
+          this.uidToOriginalData.set(node.data.uid, node)
+        }
+      }
+    )
+  }
+
+  lockInteractionsForCompleted() {
+    if (this.isLockingInteraction) return
+    this.isLockingInteraction = true
+    this.cachedBeforeTextEdit = this.mindMap.opt.beforeTextEdit
+    this.cachedReadonly = this.mindMap.opt.readonly
+
+    this.mindMap.opt.beforeTextEdit = () => false
+    this.mindMap.opt.readonly = true
+  }
+
+  restoreInteractionLock() {
+    if (!this.isLockingInteraction) return
+    this.isLockingInteraction = false
+    this.mindMap.opt.beforeTextEdit = this.cachedBeforeTextEdit
+    this.mindMap.opt.readonly = this.cachedReadonly
+    this.cachedBeforeTextEdit = null
+    this.cachedReadonly = null
+  }
+
+  applyVirtualView() {
+    this.isUsingVirtualView = true
+    if (!this.mindMap.command.isPause) {
+      this.mindMap.command.pause()
+    }
+    let previousVisible = new Set(this.currentVisibleUidSet)
+    if (previousVisible.size === 0) {
+      const currentData = this.mindMap.opt && this.mindMap.opt.data
+      if (currentData) {
+        previousVisible = this.collectVisibleUids(currentData)
+      }
+    }
+    const viewData = this.buildViewData(this.filterMode)
+    if (!viewData) return
+    const nextVisiblePreview = this.collectVisibleUids(viewData)
+    const removed = [...previousVisible].filter(
+      uid => !nextVisiblePreview.has(uid)
+    )
+    const added = [...nextVisiblePreview].filter(
+      uid => !previousVisible.has(uid)
+    )
+
+    const applyView = () => {
+      if (added.length > 0) {
+        this.pendingEnterUids = new Set(added)
+      } else {
+        this.pendingEnterUids.clear()
+      }
+      this.applyViewData(viewData, nextVisiblePreview)
+    }
+
+    const needExitAnimation = removed.length > 0 &&
+      (this.filterMode === 'uncompleted' || this.filterMode === 'completed')
+
+    if (needExitAnimation) {
+      this.animateNodesExit(removed)
+        .then(applyView)
+        .catch(() => {
+          applyView()
+        })
+    } else {
+      applyView()
+    }
+  }
+
+  applyViewData(viewData, precomputedVisibleSet = null) {
+    const nextVisible = precomputedVisibleSet
+      ? new Set(precomputedVisibleSet)
+      : this.collectVisibleUids(viewData)
+    this.currentVisibleUidSet = nextVisible
+
+    this.setRendererData(viewData)
+  }
+
+  setRendererData(data) {
+    if (!data) return
+    const cloned = simpleDeepClone(data)
+    if (this.fullDataCache && this.fullDataCache.smmVersion) {
+      cloned.smmVersion = this.fullDataCache.smmVersion
+    }
+    this.currentViewData = simpleDeepClone(cloned)
+    this.mindMap.opt.data = simpleDeepClone(cloned)
+    this.mindMap.renderer.setData(cloned)
+    this.renderedNodeMap.clear()
+    this.mindMap.render()
+  }
+
+  collectVisibleUids(node, set = new Set()) {
+    if (!node || !node.data) return set
+    if (!this.virtualRootUid || node.data.uid !== this.virtualRootUid) {
+      set.add(node.data.uid)
+    }
+    if (node.children && node.children.length) {
+      node.children.forEach(child => {
+        this.collectVisibleUids(child, set)
+      })
+    }
+    return set
+  }
+
+  restoreOriginalView() {
+    if (!this.isUsingVirtualView) {
+      this.mindMap.render()
+      return
+    }
+    if (this.fullDataCache) {
+      const data = simpleDeepClone(this.fullDataCache)
+      this.setRendererData(data)
+      this.fullDataCache = null
+    } else if (this.currentViewData) {
+      this.setRendererData(this.currentViewData)
+    }
+    this.mindMap.command.recovery()
+    this.mindMap.command.clearHistory()
+    this.mindMap.command.addHistory()
+    this.isUsingVirtualView = false
+    this.uidToOriginalData.clear()
+    this.currentVisibleUidSet.clear()
+    this.pendingEnterUids.clear()
+    this.virtualRootUid = null
+  }
+
+  buildViewData(mode) {
+    if (!this.fullDataCache) return null
+    if (mode === 'all') {
+      return simpleDeepClone(this.fullDataCache)
+    }
+    if (mode === 'uncompleted') {
+      return this.buildUncompletedView()
+    }
+    if (mode === 'completed') {
+      return this.buildCompletedView()
+    }
+    return simpleDeepClone(this.fullDataCache)
+  }
+
+  buildUncompletedView() {
+    const filteredRoot = this.collectUncompletedNodes(this.fullDataCache)
+    if (!filteredRoot) {
+      this.virtualRootUid = createUid()
+      return {
+        data: {
+          uid: this.virtualRootUid,
+          text: '未完成任务',
+          taskChecked: false
+        },
+        children: []
+      }
+    }
+    this.virtualRootUid = null
+    return filteredRoot
+  }
+
+  collectUncompletedNodes(nodeData) {
+    if (!nodeData || !nodeData.data) return null
+    const clone = this.cloneNodeForView(nodeData)
+    const children = nodeData.children || []
+    let hasVisibleChild = false
+    clone.children = []
+
+    if (children.length > 0) {
+      children.forEach(child => {
+        const childClone = this.collectUncompletedNodes(child)
+        if (childClone) {
+          hasVisibleChild = true
+          clone.children.push(childClone)
+        }
+      })
+    }
+
+    const isLeaf = children.length === 0
+    const checked = nodeData.data && nodeData.data.taskChecked === true
+    const completion = nodeData.data && nodeData.data._completion
+    const percentage = completion ? completion.percentage : checked ? 100 : 0
+
+    if (isLeaf) {
+      return checked ? null : clone
+    }
+
+    if (hasVisibleChild) {
+      return clone
+    }
+
+    return percentage < 100 ? clone : null
+  }
+
+  buildCompletedView() {
+    const completedRoots = this.collectCompletedNodes(this.fullDataCache)
+    this.virtualRootUid = createUid()
+    return {
+      data: {
+        uid: this.virtualRootUid,
+        text: '已完成任务',
+        taskChecked: true
+      },
+      children: completedRoots
+    }
+  }
+
+  collectCompletedNodes(nodeData) {
+    if (!nodeData || !nodeData.data) return []
+    const children = nodeData.children || []
+    const hasChildren = children.length > 0
+    
+    // 计算当前节点完成度
+    const completion = nodeData.data._completion
+    const percentage = completion ? completion.percentage : 0
+    const checked = nodeData.data && nodeData.data.taskChecked === true
+    const isFullyCompleted = hasChildren ? percentage === 100 : checked
+    
+    // 如果当前节点完成度100%
+    if (isFullyCompleted) {
+      const clone = simpleDeepClone(nodeData)
+      // 递归过滤子节点，只保留已完成的
+      if (hasChildren) {
+        clone.children = []
+        children.forEach(child => {
+          const processedChild = this.cloneCompletedSubtree(child)
+          if (processedChild) {
+            clone.children.push(processedChild)
+          }
+        })
+      }
+      return [clone]
+    }
+    
+    // 如果当前节点未完成，递归查找子节点中完成的
+    let result = []
+    if (hasChildren) {
+      children.forEach(child => {
+        const childCompleted = this.collectCompletedNodes(child)
+        result = result.concat(childCompleted)
+      })
+    }
+    
+    return result
+  }
+  
+  cloneCompletedSubtree(nodeData) {
+    if (!nodeData) return null
+    
+    const children = nodeData.children || []
+    const hasChildren = children.length > 0
+    const completion = nodeData.data && nodeData.data._completion
+    const percentage = completion ? completion.percentage : 0
+    const checked = nodeData.data && nodeData.data.taskChecked === true
+    const isCompleted = hasChildren ? percentage === 100 : checked
+    
+    // 只保留已完成的节点
+    if (!isCompleted) return null
+    
+    const clone = simpleDeepClone(nodeData)
+    
+    if (hasChildren) {
+      clone.children = []
+      children.forEach(child => {
+        const processedChild = this.cloneCompletedSubtree(child)
+        if (processedChild) {
+          clone.children.push(processedChild)
+        }
+      })
+    }
+    
+    return clone
+  }
+
+  cloneNodeForView(nodeData) {
+    const clone = simpleDeepClone(nodeData)
+    if (clone) {
+      clone.children = []
+    }
+    return clone
+  }
+
+  setAllDataChildrenState(nodeData, state) {
+    if (!nodeData) return
+    nodeData.data = nodeData.data || {}
+    const children = nodeData.children || []
+    if (!children.length) {
+      nodeData.data.taskChecked = state
+      return
+    }
+    children.forEach(child => {
+      this.setAllDataChildrenState(child, state)
+    })
+    nodeData.data.taskChecked = state
+  }
+
+  animateNodesExit(uids) {
+    if (!uids || uids.length === 0) return Promise.resolve()
+    const duration = 300
+
+    console.log('[TaskCheckbox] 开始淡出动画，节点数:', uids.length)
+
+    return new Promise(resolveMain => {
+      const animations = []
+
+      uids.forEach(uid => {
+        const node = this.renderedNodeMap.get(uid)
+        if (!node || !node.group) {
+          console.warn('[TaskCheckbox] 未找到节点group:', uid)
+          return
+        }
+
+        console.log('[TaskCheckbox] 执行淡出:', uid, node.group)
+
+        try {
+          if (typeof node.group.animate === 'function') {
+            // 停止之前的动画
+            node.group.stop(true, true)
+            
+            // 启动淡出+右移动画
+            const animation = node.group
+              .animate(duration)
+              .ease('>')
+              .opacity(0)
+              .dmove(30, 0)
+            
+            animations.push(
+              new Promise(resolve => {
+                animation.after(() => {
+                  console.log('[TaskCheckbox] 淡出完成:', uid)
+                  resolve()
+                })
+              })
+            )
+          } else {
+            console.warn('[TaskCheckbox] node.group.animate 不是函数')
+            node.group.opacity(0)
+          }
+        } catch (error) {
+          console.error('[TaskCheckbox] 动画执行错误:', error)
+          if (node.group) {
+            node.group.opacity(0)
+          }
+        }
+      })
+
+      if (animations.length === 0) {
+        console.warn('[TaskCheckbox] 没有动画可执行')
+        resolveMain()
+      } else {
+        console.log('[TaskCheckbox] 等待', animations.length, '个动画完成')
+        Promise.all(animations).then(() => {
+          console.log('[TaskCheckbox] 所有淡出动画完成')
+          resolveMain()
+        })
+      }
+    })
+  }
+
+  runPendingEnterAnimations() {
+    if (!this.pendingEnterUids || this.pendingEnterUids.size === 0) return
+    const duration = 300
+
+    // 延迟确保节点已经渲染
+    setTimeout(() => {
+      this.pendingEnterUids.forEach(uid => {
+        const node = this.renderedNodeMap.get(uid)
+        if (!node || !node.group) {
+          return
+        }
+
+        try {
+          if (typeof node.group.animate === 'function') {
+            node.group.stop(true, true)
+            node.group.opacity(0)
+            node.group.dmove(-30, 0)
+            node.group
+              .animate(duration)
+              .ease('<')
+              .opacity(1)
+              .dmove(30, 0)
+          } else {
+            node.group.opacity(1)
+          }
+        } catch (error) {
+          if (node.group) {
+            node.group.opacity(1)
+          }
+        }
+      })
+      this.pendingEnterUids.clear()
+    }, 50)
   }
 
   /**
@@ -773,55 +1367,7 @@ class TaskCheckbox {
   /**
    * 应用过滤
    */
-  applyFilter() {
-    if (!this.mindMap.renderer || !this.mindMap.renderer.root) {
-      return
-    }
-    
-    const walk = (node) => {
-      if (!node || !node.group) return
-      
-      const nodeData = node.nodeData
-      const hasChildren = nodeData.children && nodeData.children.length > 0
-      
-      let shouldShow = true
-      
-      if (this.filterMode === 'uncompleted') {
-        // 仅显示未完成的节点
-        if (hasChildren) {
-          const completion = this.calculateCompletion(nodeData)
-          shouldShow = completion.percentage < 100
-        } else {
-          const checked = nodeData.data && nodeData.data.taskChecked === true
-          shouldShow = !checked
-        }
-      } else if (this.filterMode === 'completed') {
-        // 仅显示已完成的节点
-        if (hasChildren) {
-          const completion = this.calculateCompletion(nodeData)
-          shouldShow = completion.percentage === 100
-        } else {
-          const checked = nodeData.data && nodeData.data.taskChecked === true
-          shouldShow = checked
-        }
-      }
-      
-      // 设置节点可见性
-      if (node.group) {
-        node.group.style.opacity = shouldShow ? 1 : 0.3
-        // 可选：完全隐藏节点
-        // node.group.style.display = shouldShow ? 'block' : 'none'
-      }
-      
-      // 递归处理子节点
-      if (node.children && node.children.length > 0) {
-        node.children.forEach(child => walk(child))
-      }
-    }
-    
-    walk(this.mindMap.renderer.root)
-    this.mindMap.render()
-  }
+  // 原 applyFilter 逻辑已替换为按数据构建的视图模式
 
   /**
    * 显示右键过滤菜单
@@ -848,11 +1394,16 @@ class TaskCheckbox {
     menu.style.minWidth = '150px'
     menu.style.overflow = 'hidden'
     
-    const options = [
-      { mode: 'all', label: '显示所有任务' },
-      { mode: 'uncompleted', label: '仅显示未完成' },
-      { mode: 'completed', label: '仅显示已完成' }
-    ]
+    const modeLabels = {
+      all: '显示所有任务',
+      uncompleted: '仅显示未完成',
+      completed: '仅显示已完成'
+    }
+
+    const options = this.viewModes.map(mode => ({
+      mode,
+      label: modeLabels[mode] || mode
+    }))
     
     options.forEach(option => {
       const item = document.createElement('div')
